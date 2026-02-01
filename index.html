@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Interactive Grid Painter</title>
+  <style>
+    :root{
+      --bg: #0b0d12;
+      --grid-border: rgba(255,255,255,0.10);
+      --text: rgba(255,255,255,0.92);
+      --muted: rgba(255,255,255,0.55);
+    }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: radial-gradient(1200px 800px at 50% 30%, #121a2b, var(--bg));
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      color: var(--text);
+    }
+
+    .wrap{
+      height: 100%;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      box-sizing: border-box;
+    }
+
+    .card{
+      width: min(92vw, 900px);
+      background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03));
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 16px;
+      padding: 18px 18px 22px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+    }
+
+    .header{
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 14px;
+    }
+    .header h1{
+      font-size: 16px;
+      margin: 0;
+      letter-spacing: 0.2px;
+      font-weight: 650;
+    }
+    .header .hint{
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.3;
+      text-align: right;
+    }
+
+    /* Smaller, centered grid */
+    .grid-wrap{
+      display: grid;
+      place-items: center;
+    }
+    .grid{
+      width: min(72vw, 620px);   /* <-- smaller than before */
+      aspect-ratio: 1 / 1;
+      display: grid;
+      grid-template-columns: repeat(13, 1fr);
+      grid-template-rows: repeat(13, 1fr);
+      background: rgba(255,255,255,0.03);
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.12);
+      user-select: none;
+      touch-action: none;
+    }
+
+    .cell{
+      position: relative;
+      display: grid;
+      place-items: center;
+      border-right: 1px solid var(--grid-border);
+      border-bottom: 1px solid var(--grid-border);
+      font-weight: 650;
+      font-size: clamp(13px, 1.65vw, 20px); /* slightly smaller text */
+      color: rgba(0,0,0,0.75);
+      cursor: pointer;
+      transition: background-color 120ms linear, transform 120ms ease, box-shadow 120ms ease;
+    }
+
+    .cell.edge-right { border-right: none; }
+    .cell.edge-bottom { border-bottom: none; }
+
+    /* Only original cells get this outline */
+    .cell.original::after{
+      content: "";
+      position: absolute;
+      inset: 0;
+      outline: 2.5px solid rgba(0,0,0,0.92);
+      outline-offset: -2px;
+      pointer-events: none;
+    }
+
+    .cell.empty{
+      color: rgba(0,0,0,0.35);
+      font-weight: 700;
+    }
+
+    .cell:active{
+      transform: scale(0.985);
+      box-shadow: inset 0 0 0 2px rgba(255,255,255,0.18);
+    }
+
+    .footer{
+      margin-top: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      color: var(--muted);
+      font-size: 12.5px;
+    }
+    .btn{
+      appearance: none;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.06);
+      color: var(--text);
+      padding: 8px 10px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+    }
+    .btn:hover{ background: rgba(255,255,255,0.09); }
+    .btn:active{ transform: translateY(1px); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="header">
+        <h1>Interactive 13×13 Grid Painter</h1>
+        <div class="hint">
+          Click+hold any number (original or painted) → drag over “-” to fill.<br/>
+          Click a painted number to delete it. Original clues are locked.
+        </div>
+      </div>
+
+      <div class="grid-wrap">
+        <div id="grid" class="grid" aria-label="grid"></div>
+      </div>
+
+      <div class="footer">
+        <div id="status">Ready.</div>
+        <div style="display:flex; gap:10px;">
+          <button class="btn" id="resetBtn" type="button">Reset to original</button>
+          <button class="btn" id="copyBtn" type="button">Copy grid as JSON</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const orig = [
+      [ 0, 0, 0, 0,15, 0, 0, 0, 0, 0, 0, 0, 0],
+      [ 0, 0, 0, 0, 0, 0, 0,11, 0, 0, 0, 0, 0],
+      [ 0,15, 0, 5, 0, 0,15, 0,11, 0,11, 0, 0],
+      [ 0, 0, 0, 0,15, 0, 0, 8, 0,12, 0,12, 0],
+      [ 0,16, 0, 0, 0, 8, 0, 0, 0, 0, 6, 0, 0],
+      [ 0, 0, 0,16, 0, 0, 0, 0, 0, 0, 0, 0, 6],
+      [ 0, 0,16, 0, 3, 0,16, 0, 1, 0,12, 0, 0],
+      [13, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0],
+      [ 0, 0, 7, 0, 0, 0, 0,12, 0, 0, 0,10, 0],
+      [ 0, 2, 0,13, 0,16, 0, 0,14, 0, 0, 0, 0],
+      [ 0, 0,13, 0,14, 0,14, 0, 0,14, 0,10, 0],
+      [ 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0],
+      [ 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0]
+    ];
+    const N = 13;
+
+    let grid = orig.map(r => r.slice());
+    const isOriginal = orig.map(row => row.map(v => v > 0));
+
+    // Deletable only if painted == true
+    let isPainted = Array.from({length: N}, () => Array(N).fill(false));
+
+    const palette = [
+      "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+      "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+      "#aec7e8", "#ffbb78", "#98df8a", "#ff9896", "#c5b0d5",
+      "#c49c94", "#f7b6d2", "#c7c7c7", "#dbdb8d", "#9edae5"
+    ];
+    function colorForValue(v){
+      if (v === 0) return "rgba(255,255,255,0.10)";
+      const idx = ((v % palette.length) + palette.length) % palette.length;
+      return palette[idx];
+    }
+
+    const gridEl = document.getElementById("grid");
+    const statusEl = document.getElementById("status");
+    const resetBtn = document.getElementById("resetBtn");
+    const copyBtn = document.getElementById("copyBtn");
+
+    const cells = Array.from({length: N}, () => Array(N).fill(null));
+    for (let r = 0; r < N; r++){
+      for (let c = 0; c < N; c++){
+        const el = document.createElement("div");
+        el.className = "cell";
+        el.dataset.r = r;
+        el.dataset.c = c;
+
+        if (c === N-1) el.classList.add("edge-right");
+        if (r === N-1) el.classList.add("edge-bottom");
+        if (isOriginal[r][c]) el.classList.add("original");
+
+        gridEl.appendChild(el);
+        cells[r][c] = el;
+      }
+    }
+
+    function renderCell(r,c){
+      const el = cells[r][c];
+      const v = grid[r][c];
+      el.style.background = colorForValue(v);
+
+      if (v === 0){
+        el.textContent = "-";
+        el.classList.add("empty");
+      } else {
+        el.textContent = String(v);
+        el.classList.remove("empty");
+      }
+    }
+    function renderAll(){
+      for (let r=0;r<N;r++) for (let c=0;c<N;c++) renderCell(r,c);
+    }
+
+    function cellFromEl(el){
+      if (!el || !el.classList || !el.classList.contains("cell")) return null;
+      const r = Number(el.dataset.r);
+      const c = Number(el.dataset.c);
+      if (Number.isNaN(r) || Number.isNaN(c)) return null;
+      return {r,c};
+    }
+    function cellUnderPointer(evt){
+      const el = document.elementFromPoint(evt.clientX, evt.clientY);
+      return cellFromEl(el);
+    }
+
+    let isDown = false;
+    let paintValue = null;
+    let downRC = null;
+    let dragged = false;
+    let pid = null;
+
+    function paintIfVacant(rc){
+      const {r,c} = rc;
+      if (paintValue == null) return;
+
+      // Only paint empties (0). Never overwrite existing numbers.
+      if (grid[r][c] === 0 && !isOriginal[r][c]){
+        grid[r][c] = paintValue;
+        isPainted[r][c] = true;
+        renderCell(r,c);
+      }
+    }
+
+    gridEl.addEventListener("pointerdown", (e) => {
+      const rc = cellFromEl(e.target);
+      if (!rc) return;
+
+      isDown = true;
+      pid = e.pointerId;
+      dragged = false;
+      downRC = rc;
+
+      const v = grid[rc.r][rc.c];
+
+      // NEW: start painting from ANY numbered cell (original or painted)
+      if (v > 0) {
+        paintValue = v;
+        statusEl.textContent = `Painting with ${paintValue}…`;
+        gridEl.setPointerCapture(pid);
+        e.preventDefault();
+      } else {
+        paintValue = null;
+        statusEl.textContent = "Ready.";
+      }
+    });
+
+    gridEl.addEventListener("pointermove", (e) => {
+      if (!isDown || e.pointerId !== pid) return;
+      if (paintValue == null) return;
+
+      const rc = cellUnderPointer(e);
+      if (!rc) return;
+
+      if (downRC && (rc.r !== downRC.r || rc.c !== downRC.c)) dragged = true;
+
+      paintIfVacant(rc);
+      e.preventDefault();
+    });
+
+    function endPointer(e){
+      if (!isDown || e.pointerId !== pid) return;
+
+      const rc = cellUnderPointer(e) || cellFromEl(e.target);
+
+      try { gridEl.releasePointerCapture(pid); } catch {}
+
+      // Click (no drag): delete only PAINTED cells. Never delete originals.
+      if (!dragged && rc){
+        const {r,c} = rc;
+        if (isPainted[r][c]) {
+          grid[r][c] = 0;
+          isPainted[r][c] = false;
+          renderCell(r,c);
+          statusEl.textContent = "Deleted painted cell.";
+        } else if (isOriginal[r][c]) {
+          statusEl.textContent = "Original clue (locked).";
+        } else if (grid[r][c] > 0) {
+          // This would be a non-original, non-painted number (shouldn't happen),
+          // but keep behavior safe:
+          statusEl.textContent = "Locked cell.";
+        } else {
+          statusEl.textContent = "Ready.";
+        }
+      } else {
+        statusEl.textContent = "Done.";
+      }
+
+      isDown = false;
+      paintValue = null;
+      downRC = null;
+      dragged = false;
+      pid = null;
+    }
+
+    gridEl.addEventListener("pointerup", endPointer);
+    gridEl.addEventListener("pointercancel", endPointer);
+
+    resetBtn.addEventListener("click", () => {
+      grid = orig.map(r => r.slice());
+      isPainted = Array.from({length: N}, () => Array(N).fill(false));
+      renderAll();
+      statusEl.textContent = "Reset to original.";
+    });
+
+    copyBtn.addEventListener("click", async () => {
+      const text = JSON.stringify(grid);
+      try{
+        await navigator.clipboard.writeText(text);
+        statusEl.textContent = "Copied grid JSON to clipboard.";
+      } catch {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+        statusEl.textContent = "Copied grid JSON (fallback).";
+      }
+    });
+
+    renderAll();
+  </script>
+</body>
+</html>
